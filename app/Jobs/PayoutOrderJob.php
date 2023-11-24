@@ -1,0 +1,55 @@
+<?php
+
+namespace App\Jobs;
+
+use App\Models\Order;
+use App\Services\ApiService;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\DB;
+use RuntimeException;
+
+class PayoutOrderJob implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    /**
+     * Create a new job instance.
+     *
+     * @return void
+     */
+    public function __construct(
+        public Order $order
+    ) {}
+
+    /**
+     * Use the API service to send a payout of the correct amount.
+     * Note: The order status must be paid if the payout is successful, or remain unpaid in the event of an exception.
+     *
+     * @return void
+     */
+    public function handle(ApiService $apiService)
+    {
+        // Start a database transaction
+        DB::beginTransaction();
+
+        try {
+            // Use the API service to send a payout
+            $apiService->sendPayout($this->order->affiliate->user->email, $this->order->commission_owed);
+
+            // Mark the order as paid
+            $this->order->update(['payout_status' => Order::STATUS_PAID]);
+
+            // Commit the transaction if everything is successful
+            DB::commit();
+        } catch (RuntimeException $e) {
+            // If an exception occurs, rollback the transaction and rethrow the exception
+            DB::rollBack();
+            throw $e;
+        }
+    }
+}
